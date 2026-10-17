@@ -1,0 +1,17 @@
+# Hidden directories
+/.*
+!.gitignore
+!.github/
+!.github/**
+
+# Local Docker configuration
+!/.devcontainer
+
+# Operating system files
+Thumbs.db
+
+# Backups and archives
+dist/
+*.backup
+*.zip
+*.gz

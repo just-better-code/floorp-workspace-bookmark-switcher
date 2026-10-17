@@ -1,0 +1,82 @@
+[
+  {
+    "namespace": "floorpWorkspaceBars",
+    "functions": [
+      {
+        "name": "getCompatibility",
+        "type": "function",
+        "async": true,
+        "parameters": []
+      },
+      {
+        "name": "start",
+        "type": "function",
+        "async": true,
+        "parameters": []
+      },
+      {
+        "name": "getState",
+        "type": "function",
+        "async": true,
+        "parameters": []
+      },
+      {
+        "name": "openFolder",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          {
+            "name": "guid",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "bindFolder",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "type": "string"
+          },
+          {
+            "name": "guid",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "createToolbar",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "name": "copyToolbar",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          { "name": "sourceGuid", "type": "string" },
+          { "name": "targetGuid", "type": "string" }
+        ]
+      },
+      {
+        "name": "deleteFolder",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          {
+            "name": "guid",
+            "type": "string"
+          }
+        ]
+      }
+    ]
+  }
+]

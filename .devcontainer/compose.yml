@@ -1,0 +1,19 @@
+name: bookmark-toolbar-autoswitch
+services:
+  dev:
+    container_name: bookmark-toolbar-autoswitch-dev
+    image: bookmark-toolbar-autoswitch-dev:local
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    init: true
+    user: columbo
+    working_dir: /home/columbo/Projects/floorp-workspace-bookmark-switcher
+    command: ["sleep", "infinity"]
+    volumes:
+      - ..:/home/columbo/Projects/floorp-workspace-bookmark-switcher
+      - dev-home:/home/columbo
+
+volumes:
+  dev-home:
+    name: bookmark-toolbar-autoswitch-dev-home

@@ -1,0 +1,47 @@
+{
+  "manifest_version": 2,
+  "name": "Floorp Bookmark Toolbar Autoswitch",
+  "version": "0.1.0",
+  "experiment_apis": {
+    "floorpWorkspaceBars": {
+      "schema": "experiments/floorp.json",
+      "parent": {
+        "scopes": [
+          "addon_parent"
+        ],
+        "paths": [
+          [
+            "floorpWorkspaceBars"
+          ]
+        ],
+        "script": "experiments/floorp.js"
+      }
+    }
+  },
+  "description": "For Floorp only; not compatible with Firefox. Automatically switch bookmark toolbars with Floorp workspaces and share toolbars across workspaces.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bookmark-toolbar-autoswitch@columbo",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "icons": {
+    "16": "icons/icon.svg",
+    "32": "icons/icon.svg",
+    "64": "icons/icon.svg"
+  },
+  "permissions": [
+    "bookmarks"
+  ],
+  "content_security_policy": "script-src 'self'; object-src 'self'"
+}

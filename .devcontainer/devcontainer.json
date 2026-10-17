@@ -1,0 +1,14 @@
+{
+  "name": "Floorp Bookmark Toolbar Autoswitch",
+  "dockerComposeFile": "compose.yml",
+  "service": "dev",
+  "runServices": ["dev"],
+  "workspaceFolder": "/home/columbo/Projects/floorp-workspace-bookmark-switcher",
+  "remoteUser": "columbo",
+  "remoteEnv": {
+    "HOME": "/home/columbo"
+  },
+  "updateRemoteUserUID": false,
+  "overrideCommand": false,
+  "shutdownAction": "none"
+}
