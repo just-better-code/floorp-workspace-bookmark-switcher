@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Make the extension icon square with minimal transparent margins, preserving the artwork and its proportions.
+
 ## 0.1.1
 
 - Use the selected workspace/bookmark icon with tightly cropped transparent margins.
