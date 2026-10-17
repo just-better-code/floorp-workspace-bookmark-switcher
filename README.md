@@ -6,11 +6,38 @@ Automatically display the bookmark toolbar assigned to the current Floorp worksp
 
 ## Installation
 
-1. Download the `.xpi` file from the [latest GitHub Release](https://github.com/just-better-code/floorp-workspace-bookmark-switcher/releases/latest), under **Assets**.
-2. In Floorp, open **Add-ons and Themes** (`about:addons`).
-3. Open the gear menu, choose **Install Add-on From File…**, and select the downloaded `.xpi`.
+This extension is distributed as an **unsigned XPI** because its privileged experimental APIs cannot use standard AMO signing.
 
-This is an unsigned extension using privileged experimental APIs. Your Floorp profile must permit unsigned experimental extensions, including `extensions.experiments.enabled=true`. Publishing an XPI on GitHub does not provide a Mozilla signature.
+### Install the XPI
+
+1. Download `bookmark-toolbar-autoswitch-<version>.xpi` from the [latest GitHub Release](https://github.com/just-better-code/floorp-workspace-bookmark-switcher/releases/latest), under **Assets**. Choose the `.xpi`, not the source ZIP or `updates.json`.
+2. Open **Add-ons and Themes** (`about:addons`) in Floorp.
+3. Open the gear menu, choose **Install Add-on From File…**, and select the downloaded `.xpi`.
+4. Review the installation prompt and confirm installation.
+
+### Verify the installation
+
+1. Confirm **Floorp Bookmark Toolbar Autoswitch** is enabled in **Add-ons and Themes**.
+2. With Floorp workspaces enabled and the bookmarks toolbar visible, check that the selector appears at the right end of the toolbar.
+3. Restart Floorp and confirm the extension remains enabled. XPI installation is persistent; you do not need to reload it manually after each restart.
+
+### If installation or startup does not work
+
+If Floorp rejects the XPI as unsigned or blocks experimental APIs:
+
+1. Open `about:config` in Floorp and continue to the preferences page.
+2. Check these **Boolean** preferences and set them as shown, creating them if absent:
+
+   | Preference | Value |
+   | --- | --- |
+   | `extensions.experiments.enabled` | `true` |
+   | `xpinstall.signatures.required` | `false` |
+
+3. Fully quit Floorp, start it again, and retry the installation or enable the extension.
+
+These settings apply to the entire profile, not just this add-on. Install only XPIs from sources you trust. A build or managed profile that enforces signing may ignore or lock these preferences; creating them does not override that restriction. GitHub publication does not provide a Mozilla signature.
+
+If the extension shows a compatibility notice, confirm you are using Floorp. These settings do not enable support for Firefox.
 
 Extension ID: `bookmark-toolbar-autoswitch@just-better-code`.
 

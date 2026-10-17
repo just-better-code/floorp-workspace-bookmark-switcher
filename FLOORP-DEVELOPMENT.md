@@ -37,6 +37,6 @@ The workflow uses GitHub's built-in token with `contents: write`; repository or 
 
 ## Identity
 
-Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.1`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
+Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.3`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
 
 MIT attribution is retained in LICENSE. No browser profile is part of the extension.
