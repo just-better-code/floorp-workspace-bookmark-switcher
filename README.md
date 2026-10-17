@@ -4,15 +4,15 @@ Automatically display the bookmark toolbar assigned to the current Floorp worksp
 
 **Floorp only. Firefox and other browsers are not supported.** If the background script can run in an unsupported browser, the extension opens a compatibility notice once and stops before changing bookmarks or browser settings. If the browser blocks the experimental extension from loading, it displays its own installation error instead.
 
-## Load from a folder
+## Installation
 
-1. In Floorp, open `about:debugging#/runtime/this-firefox`.
-2. Click **Load Temporary Add-on…** and select **`manifest.json` in the repository root**.
-3. After editing the source, click **Reload** on the extension card. No compilation or XPI packaging is required.
+1. Download the `.xpi` file from the [latest GitHub Release](https://github.com/just-better-code/floorp-workspace-bookmark-switcher/releases/latest), under **Assets**.
+2. In Floorp, open **Add-ons and Themes** (`about:addons`).
+3. Open the gear menu, choose **Install Add-on From File…**, and select the downloaded `.xpi`.
 
-The extension uses privileged experimental APIs. The profile must allow them (`extensions.experiments.enabled=true`). A temporary installation lasts until the browser restarts.
+This is an unsigned extension using privileged experimental APIs. Your Floorp profile must permit unsigned experimental extensions, including `extensions.experiments.enabled=true`. Publishing an XPI on GitHub does not provide a Mozilla signature.
 
-Extension ID: `bookmark-toolbar-autoswitch@columbo`.
+Extension ID: `bookmark-toolbar-autoswitch@just-better-code`.
 
 ## Usage
 
@@ -29,42 +29,17 @@ Extension ID: `bookmark-toolbar-autoswitch@columbo`.
 
 Switching workspaces changes the toolbar view without moving or copying bookmarks. Different windows can display different folders. The extension hides **Other Bookmarks** using Floorp's built-in preference; that preference remains disabled after the extension is turned off.
 
-## Development and checks
+## Automatic updates
 
-`manifest.json` is the canonical manifest; `background.js` checks compatibility and starts the API. `experiments/` contains the privileged integration and API schema; `icons/` contains runtime icons. See [FLOORP-DEVELOPMENT.md](FLOORP-DEVELOPMENT.md) for implementation details.
+After installation, Floorp can check for updates through the extension's GitHub-hosted update feed. It downloads new versions from GitHub Releases and verifies their SHA-256 hashes. Keep automatic updates enabled for the extension in **Add-ons and Themes**.
 
-The extension has no runtime dependencies or compilation step. `.devcontainer/` provides a minimal environment for Zed and checks: container `bookmark-toolbar-autoswitch-dev`, user `columbo`, HOME `/home/columbo`. The project path inside the container matches the host path. Connect from Zed using **Project: Open Remote → Dev Container**.
-
-```sh
-docker compose -f .devcontainer/compose.yml up -d --build dev
-docker compose -f .devcontainer/compose.yml exec -T dev node --test tests/unit/*.test.cjs
-docker compose -f .devcontainer/compose.yml exec -T dev node --check background.js
-docker compose -f .devcontainer/compose.yml exec -T dev node --check experiments/floorp.js
-```
-
-Run Node.js checks inside the development container. Native browser behavior is checked manually in Floorp using **Reload** and the [manual checklist](tests/integration/README.md). There is no browser container or automatic installation.
-
-When a package is needed, `python3 scripts/package-addon.py` creates `dist/bookmark-toolbar-autoswitch-<version>.xpi` directly from the runtime sources. Packaging and installation are explicit steps, separate from source checks.
-
-## Releases and automatic updates
-
-GitHub Actions runs checks for pull requests and pushes to `main`. After successful checks on `main`, it packages the version from `manifest.json`, creates a matching `v<version>` tag, and publishes a GitHub Release containing the XPI and `updates.json`. You can also run **Actions → Check and release → Run workflow** on `main`.
-
-To release an update, increase `version` in `manifest.json`, update `CHANGELOG.md`, and push to `main`. Use three numeric components, such as `0.1.1`. An already published version is left unchanged; changes require a new version. Both assets are uploaded to a draft before publication, and an older version cannot replace a newer stable release.
-
-The extension's `update_url` points to the latest release's `updates.json`. Floorp reads this file to discover the versioned XPI and verify its SHA-256 hash. Updates are hosted on GitHub, not AMO. No separate hosting or personal access token is needed; the release job uses GitHub's built-in token with `contents: write` permission. Repository or organization policies must allow that permission.
-
-Automatic updates apply to a persistent XPI installation in a Floorp profile that permits this unsigned experimental extension. Temporary `about:debugging` installations remain a source development workflow. The update feed does not provide Mozilla signing or bypass the browser's installation requirements.
-
-Release metadata tests use Python's standard library:
-
-```sh
-python3 -m unittest discover -s tests/unit -p 'test_*.py' -v
-```
+The repository link in the extension's details opens this project. Updates use a separate `update_url` pointing to the latest release's `updates.json`; they are not distributed through AMO.
 
 ## Contributing
 
 Submit changes through pull requests. `@just-better-code` owns all files, including workflows and repository configuration. The [branch protection templates](.github/rulesets/README.md) require explicit import in GitHub Settings; files alone do not activate protection. Once enabled, `main` accepts only PR merges by the owner with passing checks. Direct pushes are blocked, including for the owner.
+
+See [FLOORP-DEVELOPMENT.md](FLOORP-DEVELOPMENT.md) for source loading, the minimal development container, tests, and release instructions. The extension has no runtime dependencies or compilation step.
 
 ## License and inspiration
 

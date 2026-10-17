@@ -12,7 +12,7 @@ FILES = (
     "compatibility.css",
     "experiments/floorp.js",
     "experiments/floorp.json",
-    "icons/icon.svg",
+    "icons/icon.png",
     "icons/selector.svg",
     "icons/copy.svg",
     "icons/paste.svg",
