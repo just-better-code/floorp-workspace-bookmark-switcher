@@ -106,6 +106,21 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       await refreshAll();
       return folder.guid;
     }
+    async function renameToolbar(guid, name) {
+      name = name.trim();
+      if (!name) throw new Error('Enter a toolbar name.');
+      await ensureFolders();
+      await run(async () => {
+        const folders = await listFolders(readMapping().rootGuid);
+        const folder = folders.find(item => item.guid === guid);
+        if (!folder) throw new Error('The bookmark toolbar no longer exists.');
+        if (folders.some(item => item.guid !== guid && item.name === name)) {
+          throw new Error('A toolbar with this name already exists.');
+        }
+        if (folder.name !== name) await PlacesUtils.bookmarks.update({ guid, title: name });
+      });
+      await refreshAll();
+    }
     async function copyToolbar(sourceGuid, targetGuid) {
       if (sourceGuid === targetGuid) throw new Error('Choose a different toolbar.');
       await ensureFolders();
@@ -232,11 +247,71 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
           }
         });
         row.appendChild(copy);
+        const rename = doc.createXULElement('toolbarbutton');
+        rename.setAttribute('image', context.extension.getURL('icons/rename.svg'));
+        rename.setAttribute('tooltiptext', `Rename “${folder.name}”`);
+        rename.setAttribute('aria-label', `Rename toolbar ${folder.name}`);
+        rename.setAttribute('class', 'toolbarbutton-1 workspace-toolbar-icon');
+        const renameError = doc.createXULElement('description');
+        renameError.hidden = true;
+        renameError.setAttribute('role', 'alert');
+        renameError.setAttribute('style', 'max-width: 320px; margin: 4px 6px; color: #d70022;');
+        let editor = null;
+        let renaming = false;
+        const cancelRename = () => {
+          editor.replaceWith(checkbox);
+          editor = null;
+          renameError.hidden = true;
+          rename.setAttribute('image', context.extension.getURL('icons/rename.svg'));
+          rename.setAttribute('tooltiptext', `Rename “${folder.name}”`);
+          rename.setAttribute('aria-label', `Rename toolbar ${folder.name}`);
+          rename.style.color = '';
+          rename.focus();
+        };
+        const saveRename = async () => {
+          if (renaming) return;
+          renaming = true;
+          editor.disabled = rename.disabled = true;
+          renameError.hidden = true;
+          try {
+            await renameToolbar(folder.guid, editor.value);
+            await renderMenu(rec);
+          } catch (error) {
+            renameError.textContent = error.message || 'Could not rename the bookmark toolbar.';
+            renameError.hidden = false;
+            editor.disabled = rename.disabled = false;
+            editor.focus();
+          } finally { renaming = false; }
+        };
+        rename.addEventListener('command', () => {
+          if (editor) { saveRename(); return; }
+          editor = doc.createElementNS('http://www.w3.org/1999/xhtml', 'input');
+          editor.type = 'text';
+          editor.value = folder.name;
+          editor.setAttribute('aria-label', 'Toolbar name');
+          editor.setAttribute('style', 'flex: 1; min-width: 0; width: 0; margin-inline: 6px; padding: 5px;');
+          editor.addEventListener('keydown', event => {
+            if (event.isComposing || !['Enter', 'Escape'].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (renaming) return;
+            if (event.key === 'Enter') saveRename();
+            else cancelRename();
+          });
+          checkbox.replaceWith(editor);
+          rename.setAttribute('image', context.extension.getURL('icons/confirm.svg'));
+          rename.setAttribute('tooltiptext', 'Save toolbar name');
+          rename.setAttribute('aria-label', 'Save toolbar name');
+          rename.style.color = '#16833b';
+          editor.focus();
+          editor.select();
+        });
+        row.appendChild(rename);
         const remove = doc.createXULElement('toolbarbutton');
-        remove.setAttribute('label', '×');
+        remove.setAttribute('image', context.extension.getURL('icons/delete.svg'));
         remove.setAttribute('tooltiptext', `Delete “${folder.name}” and its bookmarks`);
         remove.setAttribute('aria-label', `Delete folder ${folder.name}`);
-        remove.setAttribute('class', 'toolbarbutton-1');
+        remove.setAttribute('class', 'toolbarbutton-1 workspace-toolbar-icon');
         remove.disabled = !folder.canDelete;
         remove.addEventListener('command', () => {
           if (!Services.prompt.confirm(rec.win, 'Delete folder', `Delete “${folder.name}” and all its bookmarks? All workspaces using this folder will be unbound.`)) return;
@@ -244,6 +319,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         });
         row.appendChild(remove);
         rec.menuBody.appendChild(row);
+        rec.menuBody.appendChild(renameError);
       }
       const addRow = doc.createXULElement('hbox');
       addRow.setAttribute('align', 'center');
@@ -341,6 +417,14 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
           border-color: color-mix(in srgb, currentColor 25%, transparent);
         }
         #floorp-workspace-folder-menu .workspace-toolbar-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+          width: 28px;
+          min-width: 28px;
+          height: 28px;
+          flex-shrink: 0;
           -moz-context-properties: fill, fill-opacity;
           fill: currentColor;
           padding: 6px;
@@ -348,6 +432,8 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         #floorp-workspace-folder-menu .workspace-toolbar-icon > .toolbarbutton-icon {
           width: 16px;
           height: 16px;
+          margin: 0;
+          padding: 0;
         }
         #floorp-workspace-folder-menu .workspace-toolbar-icon > .toolbarbutton-text {
           display: none;
@@ -503,6 +589,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         return { currentId, folders: map.folders, bars: (getStore().data || []).map(([id, ws]) => ({ id, name: ws.name, folderGuid: map.workspaces[id] })) };
       },
       createToolbar,
+      renameToolbar,
       copyToolbar,
       bindFolder,
       deleteFolder,

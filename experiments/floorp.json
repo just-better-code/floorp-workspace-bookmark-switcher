@@ -58,6 +58,15 @@
         ]
       },
       {
+        "name": "renameToolbar",
+        "type": "function",
+        "async": true,
+        "parameters": [
+          { "name": "guid", "type": "string" },
+          { "name": "name", "type": "string" }
+        ]
+      },
+      {
         "name": "copyToolbar",
         "type": "function",
         "async": true,

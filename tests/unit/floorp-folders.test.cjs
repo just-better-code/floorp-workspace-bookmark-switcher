@@ -92,6 +92,63 @@ test('Firefox cannot start or modify bookmarks even when experiment APIs are ena
   assert.equal(JSON.stringify([...s.nodes]), bookmarks)
 })
 
+test('renaming a shared toolbar preserves its GUID, contents and all bindings', async () => {
+  const s = setup()
+  await s.api.bindFolder('first', 'home')
+  await s.api.bindFolder('second', 'home')
+  s.nodes.set('keep', { guid: 'keep', type: 1, parentGuid: 'home', title: 'Keep', url: 'https://example.net/' })
+  const before = await s.mapping()
+  const count = s.nodes.size
+  await s.api.renameToolbar('home', '  Shared  ')
+  assert.equal(s.nodes.get('home').title, 'Shared')
+  assert.equal(s.nodes.get('keep').parentGuid, 'home')
+  assert.deepEqual(await s.mapping(), before)
+  assert.equal(s.nodes.size, count)
+  assert.equal((await s.api.getState()).folders.find(folder => folder.guid === 'home').name, 'Shared')
+})
+
+test('rename rejects blank and duplicate names without changing the folder', async () => {
+  const s = setup()
+  await s.api.getState()
+  await assert.rejects(s.api.renameToolbar('home', '   '), /Enter a toolbar name/)
+  await assert.rejects(s.api.renameToolbar('home', ' Mil '), /already exists/)
+  assert.equal(s.nodes.get('home').title, 'Home')
+  await s.api.renameToolbar('home', ' Home ')
+  assert.equal(s.nodes.get('home').title, 'Home')
+})
+
+test('rename refuses browser roots and folders outside the collection', async () => {
+  const s = setup()
+  for (const guid of ['toolbar', 'menu', 'root', 'nested', 'missing']) {
+    await assert.rejects(s.api.renameToolbar(guid, 'New name'), /no longer exists/)
+  }
+  assert.equal(s.nodes.get('root').title, 'Workspace Bookmarks')
+  assert.equal(s.nodes.get('nested').title, 'Nested')
+})
+
+test('concurrent renames cannot create duplicate toolbar names', async () => {
+  const s = setup()
+  addMil(s)
+  const results = await Promise.allSettled([
+    s.api.renameToolbar('home', 'Shared'),
+    s.api.renameToolbar('mil', 'Shared'),
+  ])
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+  assert.equal([...s.nodes.values()].filter(node => node.title === 'Shared').length, 1)
+})
+
+test('a failed rename leaves bindings and the name unchanged and can be retried', async () => {
+  const s = setup()
+  const before = await s.mapping()
+  s.failOnce('home')
+  await assert.rejects(s.api.renameToolbar('home', 'Shared'), /Interrupted/)
+  assert.equal(s.nodes.get('home').title, 'Home')
+  assert.deepEqual(await s.mapping(), before)
+  await s.api.renameToolbar('home', 'Shared')
+  assert.equal(s.nodes.get('home').title, 'Shared')
+  assert.deepEqual(await s.mapping(), before)
+})
+
 test('creating a toolbar trims its name and preserves bindings', async () => {
   const s = setup()
   const before = await s.mapping()
