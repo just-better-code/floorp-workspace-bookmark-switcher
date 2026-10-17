@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.3
+## 0.2.0
 
-- Repackage the current extension as version 0.1.3.
+- Retry workspace and native bookmark view initialization every second until ready, applying the current toolbar after a browser restart without a workspace click.
+- Archive standard toolbar contents once under Workspace Bookmarks, preserving originals and nested folders while leaving the base toolbar empty. Interrupted transfers resume without duplicate backups; manual restoration remains possible.
 
 ## 0.1.2
 

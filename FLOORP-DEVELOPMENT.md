@@ -14,7 +14,13 @@ The repository is an unpacked extension. Load the root `manifest.json` from `abo
 
 During initial setup, folders under **Workspace Bookmarks** are matched by workspace name, and missing folders are created once for every workspace. A new folder for the active workspace receives a copy of the standard toolbar. Existing contents and user choices are preserved. Initialization is recorded per workspace so explicit deletion does not recreate a folder. Choices persist across reloads. The selector lists only collection folders; the browser toolbar itself is not selectable. Missing or invalid bindings resolve by workspace name, while explicit null bindings stay unbound. Workspace rename preserves the selected folder; deleting a workspace removes only its binding. Explicit folder deletion requires confirmation and clears every binding to the removed folder. Browser root folders cannot be deleted through the selector.
 
-The extension updates each window's Places query instead of moving bookmarks. It directs new bookmarks to the displayed folder. Event handlers, the selector, and patched browser functions are removed on shutdown. `browser.toolbars.bookmarks.showOtherBookmarks` is set to false and remains false after shutdown.
+Before completing initial setup, the extension moves the standard toolbar's original children into a uniquely named **Original Bookmarks Toolbar** folder under the collection. Active-workspace provisioning runs first so its initial copy is preserved. Folder moves retain descendants, bookmark GUIDs, and order. A collection located anywhere inside the toolbar is moved to Bookmarks Menu first to avoid a cycle. This also runs once for existing installations that have not archived their toolbar yet.
+
+The optional `toolbarBackup` mapping field records a reserved destination GUID and original child GUIDs before any moves. Interrupted transfers resume into the same destination, skipping items already moved or manually relocated. Completion is persisted; empty toolbars are also marked complete. Restored bookmarks and subsequent toolbar additions are left alone. Renaming or deleting the completed backup does not recreate it. Shutdown restores the standard toolbar view, which is normally empty after archiving; restoring its contents is a manual bookmarks-manager operation.
+
+During normal workspace switching, the extension updates each window's Places query instead of moving bookmarks. It directs new bookmarks to the displayed folder. Event handlers, the selector, and patched browser functions are removed on shutdown. `browser.toolbars.bookmarks.showOtherBookmarks` is set to false and remains false after shutdown.
+
+Startup waits for a valid restored workspace selection and initializes the native Places view before applying its binding. A single cancellable retry per window handles delayed Floorp restoration or an unavailable toolbar view; it stops after success and is cleared on shutdown. No workspace click is required.
 
 ## Development checks
 
@@ -37,6 +43,6 @@ The workflow uses GitHub's built-in token with `contents: write`; repository or 
 
 ## Identity
 
-Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.3`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
+Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.2.0`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
 
 MIT attribution is retained in LICENSE. No browser profile is part of the extension.
