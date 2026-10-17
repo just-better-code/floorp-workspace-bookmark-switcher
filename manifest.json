@@ -22,6 +22,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "bookmark-toolbar-autoswitch@columbo",
+      "update_url": "https://github.com/just-better-code/floorp-workspace-bookmark-switcher/releases/latest/download/updates.json",
       "data_collection_permissions": {
         "required": [
           "none"

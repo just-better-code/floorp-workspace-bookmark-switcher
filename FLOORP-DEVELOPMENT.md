@@ -25,6 +25,10 @@ The extension updates each window's Places query instead of moving bookmarks. It
 
 Native XUL appearance and Places behavior still need manual testing in Floorp. Unit tests do not establish compatibility with every Floorp version.
 
+## Release automation
+
+`.github/workflows/release.yml` checks pull requests and `main` using the same minimal Node container, plus Python release tests. Only successful canonical `main` runs may publish. `scripts/release.py` generates a Gecko update manifest from the packaged XPI and uses the built-in GitHub token to upload both assets to a draft before publishing it as the latest stable release. Published versions are never overwritten; bump the root manifest version for the next release. No AMO signing or browser installation is performed by this workflow.
+
 ## Identity
 
 Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.0`. ID: `bookmark-toolbar-autoswitch@columbo`.

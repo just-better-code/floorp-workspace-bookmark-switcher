@@ -1,0 +1,53 @@
+name: Check and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Start minimal development container
+        run: docker compose -f .devcontainer/compose.yml up --build -d dev
+      - name: Check JavaScript syntax and unit tests
+        run: |
+          docker compose -f .devcontainer/compose.yml exec -T dev sh -lc \
+            'set -e; node --check background.js; node --check experiments/floorp.js; node --test tests/unit/*.test.cjs'
+      - name: Check release metadata and publishing behavior
+        run: python3 -m unittest discover -s tests/unit -p 'test_*.py' -v
+      - name: Stop development container
+        if: always()
+        run: docker compose -f .devcontainer/compose.yml down --volumes
+
+  release:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'just-better-code/floorp-workspace-bookmark-switcher'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Package XPI
+        run: python3 scripts/package-addon.py
+      - name: Generate update manifest and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py --publish

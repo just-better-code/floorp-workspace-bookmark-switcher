@@ -2,6 +2,7 @@
 
 ## 0.1.0 — development
 
+- GitHub Actions checks, versioned XPI releases, and a GitHub-hosted automatic update feed.
 - Floorp-first branding and an unsupported-browser notice; Firefox startup is blocked before changes.
 - Standalone unpacked Floorp extension with no compilation step.
 - Automatic per-window bookmark toolbar selection by workspace.
@@ -9,4 +10,4 @@
 - Initial folder matching by workspace name and persistent manual choices.
 - Confirmed manual folder deletion; no automatic bookmark deletion on workspace removal.
 
-Based on the MIT-licensed Kapcash/bookmark-switcher; see LICENSE.
+Inspired by Kapcash/bookmark-switcher; the original MIT notice is retained in LICENSE.

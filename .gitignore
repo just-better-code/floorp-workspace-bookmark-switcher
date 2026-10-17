@@ -15,3 +15,7 @@ dist/
 *.backup
 *.zip
 *.gz
+
+# Python checks
+__pycache__/
+*.pyc
