@@ -21,6 +21,8 @@ The extension updates each window's Places query instead of moving bookmarks. It
 - `.devcontainer/` contains a single Node development service with Git/curl for Zed. It has no browser service or exposed ports. UID/GID are 1000, user is `columbo`, HOME is `/home/columbo`, and the repository is mounted at the same absolute path as on the host.
 - Run `node --test tests/unit/*.test.cjs`, `node --check background.js`, and `node --check experiments/floorp.js` through `docker compose -f .devcontainer/compose.yml exec -T dev`. No npm dependencies are needed.
 - The agent checks syntax and unit behavior. The user checks native behavior by manually reloading the unpacked extension in Floorp. Do not run browser integration diagnostics or add a browser service.
+- Start the development container with `docker compose -f .devcontainer/compose.yml up -d --build dev`. Connect from Zed using **Project: Open Remote → Dev Container**.
+- Run release metadata tests with `python3 -m unittest discover -s tests/unit -p 'test_*.py' -v`. They use Python's standard library and mock all publishing calls.
 - `scripts/package-addon.py`: explicit runtime allowlist, including LICENSE; excludes tests, local backups, and development dependencies. Do not run without a packaging request.
 
 Native XUL appearance and Places behavior still need manual testing in Floorp. Unit tests do not establish compatibility with every Floorp version.
@@ -29,8 +31,12 @@ Native XUL appearance and Places behavior still need manual testing in Floorp. U
 
 `.github/workflows/release.yml` checks pull requests and `main` using the same minimal Node container, plus Python release tests. Only successful canonical `main` runs may publish. `scripts/release.py` generates a Gecko update manifest from the packaged XPI and uses the built-in GitHub token to upload both assets to a draft before publishing it as the latest stable release. Published versions are never overwritten; bump the root manifest version for the next release. No AMO signing or browser installation is performed by this workflow.
 
+To release an update, increase `version` in `manifest.json` using three numeric components (for example, `0.1.1`), update `CHANGELOG.md`, and merge the PR into `main`. Actions creates the `v<version>` tag and attaches the XPI and `updates.json` to the release. **Actions → Check and release → Run workflow** on `main` can retry a run; a matching draft can be resumed. An older version cannot replace a newer stable release.
+
+The workflow uses GitHub's built-in token with `contents: write`; repository or organization policies must allow that permission. No separate hosting or personal access token is needed. `homepage_url` links to the repository, while `browser_specific_settings.gecko.update_url` points to the latest release's `updates.json`. Automatic updates require a persistent XPI installation in a profile that permits unsigned experimental extensions; temporary source loads are for development.
+
 ## Identity
 
-Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.0`. ID: `bookmark-toolbar-autoswitch@columbo`.
+Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.1.0`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
 
 MIT attribution is retained in LICENSE. No browser profile is part of the extension.
