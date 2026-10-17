@@ -1,39 +1,39 @@
 # Floorp Bookmark Toolbar Autoswitch
 
-Автоматично показує на панелі закладок теку, обрану для поточного простору Floorp. Одну теку можна під’єднати до кількох просторів.
+Automatically display the bookmark toolbar assigned to the current Floorp workspace. Multiple workspaces can share the same toolbar.
 
-Працює лише у **Floorp**. Firefox та інші браузери не підтримуються. Якщо фоновий код може запуститися в несумісному середовищі, аддон один раз відкриває сторінку з поясненням і не змінює закладки чи налаштування. Якщо сам браузер блокує завантаження експериментального розширення, повідомлення про помилку показує браузер.
+**Floorp only. Firefox and other browsers are not supported.** If the background script can run in an unsupported browser, the extension opens a compatibility notice once and stops before changing bookmarks or browser settings. If the browser blocks the experimental extension from loading, it displays its own installation error instead.
 
-## Встановлення з теки
+## Load from a folder
 
-1. У Floorp відкрий `about:debugging#/runtime/this-firefox`.
-2. Натисни **Load Temporary Add-on…** і вибери **`manifest.json` у корені цього проєкту**.
-3. Після змін у файлах натискай **Reload** у картці аддона. Компіляція та збирання XPI не потрібні.
+1. In Floorp, open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…** and select **`manifest.json` in the repository root**.
+3. After editing the source, click **Reload** on the extension card. No compilation or XPI packaging is required.
 
-Аддон використовує привілейований експериментальний API Floorp. Потрібен профіль, де дозволено експериментальні API (`extensions.experiments.enabled=true`). Тимчасове встановлення діє до перезапуску браузера.
+The extension uses privileged experimental APIs. The profile must allow them (`extensions.experiments.enabled=true`). A temporary installation lasts until the browser restarts.
 
-ID аддона — `bookmark-toolbar-autoswitch@columbo`.
+Extension ID: `bookmark-toolbar-autoswitch@columbo`.
 
-## Використання
+## Usage
 
-- Праворуч на панелі закладок є кнопка з монохромною контурною іконкою закладки-стрічки; підказка — **Choose a bookmark toolbar for the current workspace**.
-- **+** під списком відкриває поле назви та зелену галочку створення. **Enter** зберігає, **Escape** скасовує. Новий тулбар порожній; обери його чекбоксом для прив’язки до простору. Порожні та повторні назви не приймаються.
-- **Copy** перед видаленням обирає джерело. **Paste** в іншому рядку додає його закладки та вкладені теки до наявних, зберігаючи оригінали. Самокопіювання заблоковано. Після вставки або повторного відкриття меню вибір джерела скидається.
-- Перед **Copy** показано іконки просторів, прив’язаних до тулбара. Наведення показує назву; поточний простір виділено тлом. Якщо іконка Floorp недоступна, показано першу літеру назви.
-- Позначка біля теки прив’язує її до поточного простору. У кожного простору одна обрана тека; одна тека може бути спільною.
-- Меню показує теки з **Workspace Bookmarks** у меню закладок. Теки можна додавати через менеджер закладок.
-- Під час першого налаштування аддон знаходить або створює іменовану теку для кожного простору. Нову теку активного простору заповнює копією стандартної панелі, оригінали залишаються на місці. Наявні теки й ручні прив’язки зберігаються. Видалена через аддон тека не створюється знову.
-- Без прив’язки показується стандартна панель. Ctrl+D зберігає закладки в теку, показану в активному вікні.
-- Видалення чи перейменування простору не видаляє і не перейменовує теку.
-- **«×»** видаляє теку разом із закладками після підтвердження й скидає всі прив’язки до неї.
+- Open the bookmark ribbon button at the right end of the bookmarks toolbar. Its tooltip is **Choose a bookmark toolbar for the current workspace**.
+- Click **+** below the list to enter a toolbar name, then click the green checkmark or press **Enter** to create it. Press **Escape** to cancel. New toolbars are empty; select the checkbox to assign one to the current workspace. Blank and duplicate names are rejected.
+- The **Copy** icon selects a source toolbar. **Paste** in another row appends copies of its bookmarks and nested folders, preserving existing contents and originals. A toolbar cannot be pasted into itself. The source selection resets after pasting or reopening the menu.
+- Workspace icons before **Copy** show which workspaces use each toolbar. Hover to see their names; the current workspace has a highlighted background. If a Floorp icon is unavailable, the first letter of the workspace name is shown instead.
+- Select a toolbar's checkbox to assign it to the current workspace. Each workspace has one selected toolbar; a toolbar can serve multiple workspaces.
+- Toolbars are stored as folders under **Bookmarks Menu → Workspace Bookmarks**. You can also add folders there using the bookmarks manager.
+- During initial setup, the extension matches folders by workspace name and creates missing ones. A newly created folder for the active workspace receives a copy of the standard toolbar; originals stay in place. Existing folders and manual assignments are preserved. Folders deleted through the extension are not automatically recreated.
+- An unassigned workspace displays the standard bookmarks toolbar. **Ctrl+D** saves to the folder displayed in the active window.
+- Renaming or deleting a workspace does not rename or delete its bookmark folder.
+- **×** deletes a folder and its bookmarks after confirmation, clearing every workspace assignment to it.
 
-Змінюється лише представлення панелі: закладки не копіюються під час перемикання. Різні вікна можуть показувати різні теки. Кнопка «Інші закладки» вимикається штатним налаштуванням Floorp.
+Switching workspaces changes the toolbar view without moving or copying bookmarks. Different windows can display different folders. The extension hides **Other Bookmarks** using Floorp's built-in preference; that preference remains disabled after the extension is turned off.
 
-## Структура та перевірки
+## Development and checks
 
-`manifest.json` — єдиний маніфест; `background.js` запускає API. У `experiments/` — привілейований код і схема API, у `icons/` — іконки.
+`manifest.json` is the canonical manifest; `background.js` checks compatibility and starts the API. `experiments/` contains the privileged integration and API schema; `icons/` contains runtime icons. See [FLOORP-DEVELOPMENT.md](FLOORP-DEVELOPMENT.md) for implementation details.
 
-Залежностей для роботи аддона немає. У `.devcontainer/` є мінімальне середовище для Zed і перевірок. Контейнер — `bookmark-toolbar-autoswitch-dev`, користувач — `columbo`, HOME — `/home/columbo`. Шлях проєкту всередині й зовні однаковий. Zed підключається через **Project: Open Remote → Dev Container**.
+The extension has no runtime dependencies or compilation step. `.devcontainer/` provides a minimal environment for Zed and checks: container `bookmark-toolbar-autoswitch-dev`, user `columbo`, HOME `/home/columbo`. The project path inside the container matches the host path. Connect from Zed using **Project: Open Remote → Dev Container**.
 
 ```sh
 docker compose -f .devcontainer/compose.yml up -d --build dev
@@ -42,10 +42,30 @@ docker compose -f .devcontainer/compose.yml exec -T dev node --check background.
 docker compose -f .devcontainer/compose.yml exec -T dev node --check experiments/floorp.js
 ```
 
-Агент перевіряє синтаксис і юніт-тести; поведінку перевіряє користувач у своєму Floorp через **Reload**. Браузерних контейнерів та автоматичного встановлення немає.
+Run Node.js checks inside the development container. Native browser behavior is checked manually in Floorp using **Reload** and the [manual checklist](tests/integration/README.md). There is no browser container or automatic installation.
 
-За потреби `python3 scripts/package-addon.py` пакує вихідні файли в `dist/bookmark-toolbar-autoswitch-0.1.0.xpi`, без компіляції. Пакування й встановлення запускаються лише за запитом.
+When a package is needed, `python3 scripts/package-addon.py` creates `dist/bookmark-toolbar-autoswitch-<version>.xpi` directly from the runtime sources. Packaging and installation are explicit steps, separate from source checks.
 
-## Ліцензія
+## Releases and automatic updates
 
-MIT; вихідний проєкт — [Kapcash/bookmark-switcher](https://github.com/Kapcash/bookmark-switcher). Повідомлення про авторські права збережено в [LICENSE](LICENSE).
+GitHub Actions runs checks for pull requests and pushes to `main`. After successful checks on `main`, it packages the version from `manifest.json`, creates a matching `v<version>` tag, and publishes a GitHub Release containing the XPI and `updates.json`. You can also run **Actions → Check and release → Run workflow** on `main`.
+
+To release an update, increase `version` in `manifest.json`, update `CHANGELOG.md`, and push to `main`. Use three numeric components, such as `0.1.1`. An already published version is left unchanged; changes require a new version. Both assets are uploaded to a draft before publication, and an older version cannot replace a newer stable release.
+
+The extension's `update_url` points to the latest release's `updates.json`. Floorp reads this file to discover the versioned XPI and verify its SHA-256 hash. Updates are hosted on GitHub, not AMO. No separate hosting or personal access token is needed; the release job uses GitHub's built-in token with `contents: write` permission. Repository or organization policies must allow that permission.
+
+Automatic updates apply to a persistent XPI installation in a Floorp profile that permits this unsigned experimental extension. Temporary `about:debugging` installations remain a source development workflow. The update feed does not provide Mozilla signing or bypass the browser's installation requirements.
+
+Release metadata tests use Python's standard library:
+
+```sh
+python3 -m unittest discover -s tests/unit -p 'test_*.py' -v
+```
+
+## Contributing
+
+Submit changes through pull requests. `@just-better-code` owns all files, including workflows and repository configuration. The [branch protection templates](.github/rulesets/README.md) require explicit import in GitHub Settings; files alone do not activate protection. Once enabled, `main` accepts only PR merges by the owner with passing checks. Direct pushes are blocked, including for the owner.
+
+## License and inspiration
+
+Released under the MIT license. Inspired by [Kapcash/bookmark-switcher](https://github.com/Kapcash/bookmark-switcher); the current implementation provides Floorp workspace integration and a native toolbar selector. The original copyright and license notice are retained in [LICENSE](LICENSE).
