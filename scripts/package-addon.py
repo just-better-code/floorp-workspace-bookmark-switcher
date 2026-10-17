@@ -16,6 +16,9 @@ FILES = (
     "icons/selector.svg",
     "icons/copy.svg",
     "icons/paste.svg",
+    "icons/delete.svg",
+    "icons/rename.svg",
+    "icons/confirm.svg",
     "LICENSE",
 )
 

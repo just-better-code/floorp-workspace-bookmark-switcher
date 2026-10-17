@@ -48,13 +48,22 @@ Extension ID: `bookmark-toolbar-autoswitch@just-better-code`.
 - The **Copy** icon selects a source toolbar. **Paste** in another row appends copies of its bookmarks and nested folders, preserving existing contents and originals. A toolbar cannot be pasted into itself. The source selection resets after pasting or reopening the menu.
 - Workspace icons before **Copy** show which workspaces use each toolbar. Hover to see their names; the current workspace has a highlighted background. If a Floorp icon is unavailable, the first letter of the workspace name is shown instead.
 - Select a toolbar's checkbox to assign it to the current workspace. Each workspace has one selected toolbar; a toolbar can serve multiple workspaces.
+- Click the **Rename** pencil between Copy and Delete to edit a toolbar's name. The green checkmark or **Enter** saves; **Escape** cancels. Bookmarks and workspace assignments are preserved. Blank and duplicate names are rejected.
 - Toolbars are stored as folders under **Bookmarks Menu → Workspace Bookmarks**. You can also add folders there using the bookmarks manager.
-- During initial setup, the extension matches folders by workspace name and creates missing ones. A newly created folder for the active workspace receives a copy of the standard toolbar; originals stay in place. Existing folders and manual assignments are preserved. Folders deleted through the extension are not automatically recreated.
+- During initial setup, the extension matches folders by workspace name and creates missing ones. A newly created folder for the active workspace receives a copy of the standard toolbar. Existing folders and manual assignments are preserved. Folders deleted through the extension are not automatically recreated.
 - An unassigned workspace displays the standard bookmarks toolbar. **Ctrl+D** saves to the folder displayed in the active window.
 - Renaming or deleting a workspace does not rename or delete its bookmark folder.
 - **×** deletes a folder and its bookmarks after confirmation, clearing every workspace assignment to it.
 
 Switching workspaces changes the toolbar view without moving or copying bookmarks. Different windows can display different folders. The extension hides **Other Bookmarks** using Floorp's built-in preference; that preference remains disabled after the extension is turned off.
+
+## Original toolbar backup
+
+On the first successful startup after installation or updating to this feature, existing standard toolbar bookmarks, folders, and separators are moved into **Bookmarks Menu → Workspace Bookmarks → Original Bookmarks Toolbar**. Nothing is deleted; original bookmark IDs and nested folders are preserved. An empty toolbar needs no backup folder. An existing folder with that name is preserved and the backup receives a numbered suffix.
+
+The standard toolbar is then empty, including before the extension loads on later browser starts or when no workspace toolbar is assigned. This cannot prevent the initial display before the extension has run once.
+
+The backup is available in the selector: assign it to a workspace, copy its contents to another toolbar, or delete it after confirmation. To restore the standard toolbar, open the bookmarks manager and move the backup folder's contents into **Bookmarks Toolbar**. This one-time transfer does not repeat after restoration, renaming, or deleting the backup. Disabling or uninstalling the extension does not automatically restore the originals.
 
 ## Automatic updates
 

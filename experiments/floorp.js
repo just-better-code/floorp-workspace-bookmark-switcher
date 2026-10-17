@@ -6,6 +6,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
     const PREF = 'floorp.workspace-bookmarks.mapping';
     const STORE = 'floorp.workspaces.v4.store';
     const ROOT_TITLE = 'Workspace Bookmarks';
+    const BACKUP_TITLE = 'Original Bookmarks Toolbar';
     const isSupported = () => Services.appinfo.name.toLowerCase() === 'floorp';
     const requireFloorp = () => {
       if (!isSupported()) throw new Error('This extension requires Floorp. Firefox is not supported.');
@@ -31,6 +32,50 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         .filter(node => (node.typeCode ?? node.type) === b.TYPE_FOLDER)
         .map(node => ({ guid: node.guid, name: node.title || 'Untitled', canDelete: true }));
     };
+    async function backupStandardToolbar(map, folders) {
+      if (map.toolbarBackup?.complete) return;
+      const b = PlacesUtils.bookmarks;
+      // Keep the collection outside the toolbar before moving its children.
+      const root = await b.fetch(map.rootGuid);
+      let ancestor = root;
+      while (ancestor?.parentGuid) {
+        if (ancestor.parentGuid === b.toolbarGuid) {
+          await b.update({ guid: root.guid, parentGuid: b.menuGuid, index: b.DEFAULT_INDEX });
+          break;
+        }
+        ancestor = await b.fetch(ancestor.parentGuid);
+      }
+      if (!map.toolbarBackup) {
+        const tree = await PlacesUtils.promiseBookmarksTree(b.toolbarGuid);
+        const items = (tree.children || []).map(node => node.guid);
+        if (!items.length) { map.toolbarBackup = { complete: true }; return; }
+        let name = BACKUP_TITLE;
+        for (let suffix = 2; folders.some(folder => folder.name === name); suffix++) name = `${BACKUP_TITLE} (${suffix})`;
+        map.toolbarBackup = { guid: PlacesUtils.history.makeGuid(), name, items, complete: false };
+        // Persist the destination and original GUIDs before the first bookmark move.
+        save(map);
+      }
+      const backup = map.toolbarBackup;
+      let folder = await b.fetch(backup.guid);
+      if (!folder) {
+        folder = await b.insert({ guid: backup.guid, parentGuid: map.rootGuid, type: b.TYPE_FOLDER, title: backup.name });
+      }
+      if (folder.type !== b.TYPE_FOLDER || folder.parentGuid !== map.rootGuid) {
+        throw new Error('The original toolbar backup is no longer in Workspace Bookmarks.');
+      }
+      if (!folders.some(item => item.guid === folder.guid)) {
+        folders.push({ guid: folder.guid, name: folder.title || backup.name, canDelete: true });
+      }
+      for (const guid of backup.items) {
+        const item = await b.fetch(guid);
+        // A completed move or a user's manual move must not be repeated.
+        if (item?.parentGuid === b.toolbarGuid) {
+          await b.update({ guid, parentGuid: backup.guid, index: b.DEFAULT_INDEX });
+        }
+      }
+      backup.complete = true;
+      delete backup.items;
+    }
     const ensureFolders = () => run(async () => {
       requireFloorp();
       const store = getStore();
@@ -88,6 +133,8 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
           map.workspaces[id] = named?.guid ?? null;
         }
       }
+      // Provision the active workspace from the original toolbar before archiving it.
+      await backupStandardToolbar(map, folders);
       save(map);
       return { ...map, folders };
     });
@@ -105,6 +152,21 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       });
       await refreshAll();
       return folder.guid;
+    }
+    async function renameToolbar(guid, name) {
+      name = name.trim();
+      if (!name) throw new Error('Enter a toolbar name.');
+      await ensureFolders();
+      await run(async () => {
+        const folders = await listFolders(readMapping().rootGuid);
+        const folder = folders.find(item => item.guid === guid);
+        if (!folder) throw new Error('The bookmark toolbar no longer exists.');
+        if (folders.some(item => item.guid !== guid && item.name === name)) {
+          throw new Error('A toolbar with this name already exists.');
+        }
+        if (folder.name !== name) await PlacesUtils.bookmarks.update({ guid, title: name });
+      });
+      await refreshAll();
     }
     async function copyToolbar(sourceGuid, targetGuid) {
       if (sourceGuid === targetGuid) throw new Error('Choose a different toolbar.');
@@ -232,11 +294,71 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
           }
         });
         row.appendChild(copy);
+        const rename = doc.createXULElement('toolbarbutton');
+        rename.setAttribute('image', context.extension.getURL('icons/rename.svg'));
+        rename.setAttribute('tooltiptext', `Rename “${folder.name}”`);
+        rename.setAttribute('aria-label', `Rename toolbar ${folder.name}`);
+        rename.setAttribute('class', 'toolbarbutton-1 workspace-toolbar-icon');
+        const renameError = doc.createXULElement('description');
+        renameError.hidden = true;
+        renameError.setAttribute('role', 'alert');
+        renameError.setAttribute('style', 'max-width: 320px; margin: 4px 6px; color: #d70022;');
+        let editor = null;
+        let renaming = false;
+        const cancelRename = () => {
+          editor.replaceWith(checkbox);
+          editor = null;
+          renameError.hidden = true;
+          rename.setAttribute('image', context.extension.getURL('icons/rename.svg'));
+          rename.setAttribute('tooltiptext', `Rename “${folder.name}”`);
+          rename.setAttribute('aria-label', `Rename toolbar ${folder.name}`);
+          rename.style.color = '';
+          rename.focus();
+        };
+        const saveRename = async () => {
+          if (renaming) return;
+          renaming = true;
+          editor.disabled = rename.disabled = true;
+          renameError.hidden = true;
+          try {
+            await renameToolbar(folder.guid, editor.value);
+            await renderMenu(rec);
+          } catch (error) {
+            renameError.textContent = error.message || 'Could not rename the bookmark toolbar.';
+            renameError.hidden = false;
+            editor.disabled = rename.disabled = false;
+            editor.focus();
+          } finally { renaming = false; }
+        };
+        rename.addEventListener('command', () => {
+          if (editor) { saveRename(); return; }
+          editor = doc.createElementNS('http://www.w3.org/1999/xhtml', 'input');
+          editor.type = 'text';
+          editor.value = folder.name;
+          editor.setAttribute('aria-label', 'Toolbar name');
+          editor.setAttribute('style', 'flex: 1; min-width: 0; width: 0; margin-inline: 6px; padding: 5px;');
+          editor.addEventListener('keydown', event => {
+            if (event.isComposing || !['Enter', 'Escape'].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (renaming) return;
+            if (event.key === 'Enter') saveRename();
+            else cancelRename();
+          });
+          checkbox.replaceWith(editor);
+          rename.setAttribute('image', context.extension.getURL('icons/confirm.svg'));
+          rename.setAttribute('tooltiptext', 'Save toolbar name');
+          rename.setAttribute('aria-label', 'Save toolbar name');
+          rename.style.color = '#16833b';
+          editor.focus();
+          editor.select();
+        });
+        row.appendChild(rename);
         const remove = doc.createXULElement('toolbarbutton');
-        remove.setAttribute('label', '×');
+        remove.setAttribute('image', context.extension.getURL('icons/delete.svg'));
         remove.setAttribute('tooltiptext', `Delete “${folder.name}” and its bookmarks`);
         remove.setAttribute('aria-label', `Delete folder ${folder.name}`);
-        remove.setAttribute('class', 'toolbarbutton-1');
+        remove.setAttribute('class', 'toolbarbutton-1 workspace-toolbar-icon');
         remove.disabled = !folder.canDelete;
         remove.addEventListener('command', () => {
           if (!Services.prompt.confirm(rec.win, 'Delete folder', `Delete “${folder.name}” and all its bookmarks? All workspaces using this folder will be unbound.`)) return;
@@ -244,6 +366,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         });
         row.appendChild(remove);
         rec.menuBody.appendChild(row);
+        rec.menuBody.appendChild(renameError);
       }
       const addRow = doc.createXULElement('hbox');
       addRow.setAttribute('align', 'center');
@@ -341,6 +464,14 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
           border-color: color-mix(in srgb, currentColor 25%, transparent);
         }
         #floorp-workspace-folder-menu .workspace-toolbar-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+          width: 28px;
+          min-width: 28px;
+          height: 28px;
+          flex-shrink: 0;
           -moz-context-properties: fill, fill-opacity;
           fill: currentColor;
           padding: 6px;
@@ -348,6 +479,8 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         #floorp-workspace-folder-menu .workspace-toolbar-icon > .toolbarbutton-icon {
           width: 16px;
           height: 16px;
+          margin: 0;
+          padding: 0;
         }
         #floorp-workspace-folder-menu .workspace-toolbar-icon > .toolbarbutton-text {
           display: none;
@@ -395,33 +528,58 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       const place = 'place:parent=' + rec.folderGuid;
       if (view && view.place !== place) view.place = place;
       if (rec.win.document.hasFocus()) Services.prefs.setStringPref('browser.bookmarks.defaultLocation', rec.folderGuid);
+      return !!view;
+    }
+    function retryUpdate(rec) {
+      if (closed || rec.detached || rec.win.closed || rec.retryTimer != null) return;
+      rec.retryTimer = rec.win.setTimeout(() => {
+        rec.retryTimer = null;
+        update(rec);
+      }, 1000);
     }
     async function update(rec) {
       const token = ++rec.token;
       try {
+        if (rec.win.closed || closed || rec.detached) return;
         const enabled = Services.prefs.getBoolPref('floorp.workspaces.enabled', false);
         const ctx = rec.win.workspacesFuncs;
-        if (!ctx || rec.win.closed || closed) return;
         if (!enabled) {
           rec.folderGuid = PlacesUtils.bookmarks.toolbarGuid;
           apply(rec);
           return;
         }
-        const id = ctx.getSelectedWorkspaceID();
+        const id = ctx?.getSelectedWorkspaceID();
+        // Floorp restores the selected workspace after browser delayed startup.
+        // Do not treat a not-yet-restored selection as an unbound workspace.
+        if (!id || !getStore().data?.some(([workspaceId]) => workspaceId === id)) {
+          retryUpdate(rec);
+          return;
+        }
         const map = await ensureFolders();
         if (closed || token !== rec.token || rec.win.closed || rec.detached) return;
+        if (ctx.getSelectedWorkspaceID() !== id) { retryUpdate(rec); return; }
         if (rec.workspaceId !== id) rec.menu?.hidePopup();
         rec.workspaceId = id;
         rec.folderGuid = map.workspaces[id] || PlacesUtils.bookmarks.toolbarGuid;
-        apply(rec);
+        await rec.win.PlacesToolbarHelper.init();
+        if (closed || token !== rec.token || rec.win.closed || rec.detached) return;
+        if (!apply(rec)) { retryUpdate(rec); return; }
+        if (rec.retryTimer != null) {
+          rec.win.clearTimeout(rec.retryTimer);
+          rec.retryTimer = null;
+        }
         await rec.win.BookmarkingUI.updateEmptyToolbarMessage();
-      } catch (error) { Cu.reportError(error); }
+      } catch (error) { Cu.reportError(error); retryUpdate(rec); }
     }
     function install(win) {
       if (records.has(win) || win.document.documentURI !== 'chrome://browser/content/browser.xhtml') return;
       win.__floorpWorkspaceBarController?.dispose();
-      const rec = { win, token: 0, folderGuid: null, workspaceId: null, removers: [], detached: false };
-      rec.dispose = () => { rec.detached = true; for (const remove of rec.removers) remove(); };
+      const rec = { win, token: 0, folderGuid: null, workspaceId: null, removers: [], detached: false, retryTimer: null };
+      rec.dispose = () => {
+        rec.detached = true;
+        if (rec.retryTimer != null) win.clearTimeout(rec.retryTimer);
+        for (const remove of rec.removers) remove();
+      };
       win.__floorpWorkspaceBarController = rec;
       records.set(win, rec);
       installSelector(rec);
@@ -452,7 +610,6 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       }
       listen(win, 'unload', event => { if (event.target !== win.document) return; rec.dispose(); records.delete(win); });
       update(rec);
-      win.setTimeout(() => update(rec), 1200);
     }
     const allWindows = () => {
       for (const win of Services.wm.getEnumerator('navigator:browser')) if (win.gBrowserInit?.delayedStartupFinished) install(win);
@@ -503,6 +660,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         return { currentId, folders: map.folders, bars: (getStore().data || []).map(([id, ws]) => ({ id, name: ws.name, folderGuid: map.workspaces[id] })) };
       },
       createToolbar,
+      renameToolbar,
       copyToolbar,
       bindFolder,
       deleteFolder,

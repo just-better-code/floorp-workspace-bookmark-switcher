@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Retry workspace and native bookmark view initialization every second until ready, applying the current toolbar after a browser restart without a workspace click.
+- Archive standard toolbar contents once under Workspace Bookmarks, preserving originals and nested folders while leaving the base toolbar empty. Interrupted transfers resume without duplicate backups; manual restoration remains possible.
+
 ## 0.1.2
 
 - Make the extension icon square with minimal transparent margins, preserving the artwork and its proportions.

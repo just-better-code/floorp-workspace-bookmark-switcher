@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const { test } = require('node:test')
 
-function setup(existing = true) {
+function setup(existing = true, windows = []) {
   const prefs = new Map([
     ['floorp.workspaces.v4.store', JSON.stringify({ defaultID: 'first', data: [['first', { name: 'Mil' }], ['second', { name: 'Home' }]] })],
     ['floorp.workspace-bookmarks.mapping', JSON.stringify(existing ? { version: 3, rootGuid: 'root', workspaces: { first: 'toolbar', second: 'home' } } : {})],
@@ -52,14 +52,14 @@ function setup(existing = true) {
     Services: {
       appinfo: { name: 'Floorp' },
       prefs: { getStringPref: (key, fallback) => prefs.get(key) ?? fallback, setStringPref: (key, value) => prefs.set(key, value), getBoolPref: () => true, setBoolPref() {}, clearUserPref: key => prefs.delete(key), addObserver() {}, removeObserver() {} },
-      obs: { addObserver() {}, removeObserver() {} }, wm: { getEnumerator: () => [], getMostRecentWindow: () => null },
+      obs: { addObserver() {}, removeObserver() {} }, wm: { getEnumerator: () => windows, getMostRecentWindow: () => windows[0] || null },
     },
     Cu: { reportError() {} },
   }
   vm.createContext(sandbox)
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../../experiments/floorp.js'), 'utf8'), sandbox)
   let close
-  const api = new sandbox.floorpWorkspaceBars().getAPI({ callOnClose(handler) { close = handler.close } }).floorpWorkspaceBars
+  const api = new sandbox.floorpWorkspaceBars().getAPI({ extension: { getURL: path => `extension://${path}` }, callOnClose(handler) { close = handler.close } }).floorpWorkspaceBars
   return { api, nodes, prefs, sandbox, shutdown: () => close?.(), failOnce: guid => { failGuid = guid }, mapping: async () => Object.fromEntries((await api.getState()).bars.map(bar => [bar.name, bar.folderGuid])) }
 }
 
@@ -90,6 +90,63 @@ test('Firefox cannot start or modify bookmarks even when experiment APIs are ena
   assert.deepEqual(writes, [])
   assert.equal(JSON.stringify([...s.prefs]), prefs)
   assert.equal(JSON.stringify([...s.nodes]), bookmarks)
+})
+
+test('renaming a shared toolbar preserves its GUID, contents and all bindings', async () => {
+  const s = setup()
+  await s.api.bindFolder('first', 'home')
+  await s.api.bindFolder('second', 'home')
+  s.nodes.set('keep', { guid: 'keep', type: 1, parentGuid: 'home', title: 'Keep', url: 'https://example.net/' })
+  const before = await s.mapping()
+  const count = s.nodes.size
+  await s.api.renameToolbar('home', '  Shared  ')
+  assert.equal(s.nodes.get('home').title, 'Shared')
+  assert.equal(s.nodes.get('keep').parentGuid, 'home')
+  assert.deepEqual(await s.mapping(), before)
+  assert.equal(s.nodes.size, count)
+  assert.equal((await s.api.getState()).folders.find(folder => folder.guid === 'home').name, 'Shared')
+})
+
+test('rename rejects blank and duplicate names without changing the folder', async () => {
+  const s = setup()
+  await s.api.getState()
+  await assert.rejects(s.api.renameToolbar('home', '   '), /Enter a toolbar name/)
+  await assert.rejects(s.api.renameToolbar('home', ' Mil '), /already exists/)
+  assert.equal(s.nodes.get('home').title, 'Home')
+  await s.api.renameToolbar('home', ' Home ')
+  assert.equal(s.nodes.get('home').title, 'Home')
+})
+
+test('rename refuses browser roots and folders outside the collection', async () => {
+  const s = setup()
+  for (const guid of ['toolbar', 'menu', 'root', 'nested', 'missing']) {
+    await assert.rejects(s.api.renameToolbar(guid, 'New name'), /no longer exists/)
+  }
+  assert.equal(s.nodes.get('root').title, 'Workspace Bookmarks')
+  assert.equal(s.nodes.get('nested').title, 'Nested')
+})
+
+test('concurrent renames cannot create duplicate toolbar names', async () => {
+  const s = setup()
+  addMil(s)
+  const results = await Promise.allSettled([
+    s.api.renameToolbar('home', 'Shared'),
+    s.api.renameToolbar('mil', 'Shared'),
+  ])
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+  assert.equal([...s.nodes.values()].filter(node => node.title === 'Shared').length, 1)
+})
+
+test('a failed rename leaves bindings and the name unchanged and can be retried', async () => {
+  const s = setup()
+  const before = await s.mapping()
+  s.failOnce('home')
+  await assert.rejects(s.api.renameToolbar('home', 'Shared'), /Interrupted/)
+  assert.equal(s.nodes.get('home').title, 'Home')
+  assert.deepEqual(await s.mapping(), before)
+  await s.api.renameToolbar('home', 'Shared')
+  assert.equal(s.nodes.get('home').title, 'Shared')
+  assert.deepEqual(await s.mapping(), before)
 })
 
 test('creating a toolbar trims its name and preserves bindings', async () => {
@@ -163,14 +220,14 @@ test('copy failure does not leave partially appended bookmarks', async () => {
   assert.equal([...s.nodes.values()].filter(node => node.parentGuid === 'home').length, 2)
 })
 
-test('first binding matches folder names without changing bookmarks', async () => {
+test('first binding matches existing folders while archiving the standard toolbar', async () => {
   const s = setup()
   addMil(s)
   s.prefs.delete('floorp.workspace-bookmarks.mapping')
   const count = s.nodes.size
   assert.deepEqual(await s.mapping(), { Mil: 'mil', Home: 'home' })
-  assert.equal(s.nodes.size, count)
-  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.size, count + 1)
+  assert.equal(s.nodes.get('one').parentGuid, JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.guid)
 })
 
 test('two workspaces can share one folder and their choices persist', async () => {
@@ -221,7 +278,7 @@ test('explicit folder deletion clears all bindings and removes its descendants',
   assert.equal(s.nodes.has('home'), false)
   assert.equal(s.nodes.has('home-child'), false)
   assert.deepEqual(await s.mapping(), { Mil: null, Home: null })
-  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.get('one').parentGuid, JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.guid)
 })
 
 test('browser roots and folders outside the selectable collection cannot be deleted or bound', async () => {
@@ -259,10 +316,10 @@ test('missing folders are initialized for every workspace without changing exist
   const s = setup()
   const state = await s.api.getState()
   const folders = state.folders.filter(folder => folder.canDelete)
-  assert.deepEqual(Array.from(folders, folder => folder.name).sort(), ['Home', 'Mil'])
+  assert.deepEqual(Array.from(folders, folder => folder.name).sort(), ['Home', 'Mil', 'Original Bookmarks Toolbar'])
   const mil = folders.find(folder => folder.name === 'Mil')
   assert.ok([...s.nodes.values()].some(node => node.parentGuid === mil.guid && node.title === 'Original'))
-  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.get('one').parentGuid, JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.guid)
   assert.equal(state.bars.find(bar => bar.id === 'first').folderGuid, mil.guid)
   const count = s.nodes.size
   await s.api.getState()
@@ -297,7 +354,7 @@ test('an English collection is reused after restoring bookmarks without old pref
   s.prefs.delete('floorp.workspace-bookmarks.mapping')
   const count = s.nodes.size
   assert.deepEqual(await s.mapping(), { Mil: 'mil', Home: 'home' })
-  assert.equal(s.nodes.size, count)
+  assert.equal(s.nodes.size, count + 1)
 })
 
 
@@ -310,14 +367,14 @@ test('initial copies accept Places uri fields and preserve nested bookmark URLs'
   const nested = [...s.nodes.values()].find(node => node.parentGuid === mil.guid && node.title === 'Nested')
   const child = [...s.nodes.values()].find(node => node.parentGuid === nested.guid && node.title === 'Child')
   assert.equal(child.url, 'https://example.org/')
-  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.get('one').parentGuid, JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.guid)
 })
 
 
 test('selector contains only workspace folders, excluding the browser toolbar', async () => {
   const s = setup()
   const state = await s.api.getState()
-  assert.deepEqual(Array.from(state.folders, folder => folder.name).sort(), ['Home', 'Mil'])
+  assert.deepEqual(Array.from(state.folders, folder => folder.name).sort(), ['Home', 'Mil', 'Original Bookmarks Toolbar'])
   assert.equal(state.folders.some(folder => folder.guid === 'toolbar'), false)
 })
 
@@ -331,4 +388,217 @@ test('an initialized workspace bound to the excluded toolbar resolves to its nam
   assert.equal(JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).workspaces.first, 'mil')
   await s.api.bindFolder('first', 'home')
   assert.deepEqual(await s.mapping(), { Mil: 'home', Home: 'home' })
+})
+
+test('initial setup moves original bookmarks, folders and separators into a selectable archive', async () => {
+  const s = setup(false)
+  s.nodes.set('separator', { guid: 'separator', parentGuid: 'toolbar', type: 3 })
+  const state = await s.api.getState()
+  const map = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping'))
+  const archive = state.folders.find(folder => folder.guid === map.toolbarBackup.guid)
+  assert.equal(archive.name, 'Original Bookmarks Toolbar')
+  assert.equal(map.toolbarBackup.complete, true)
+  assert.equal(map.toolbarBackup.items, undefined)
+  assert.equal(s.nodes.get(archive.guid).parentGuid, map.rootGuid)
+  for (const guid of ['one', 'nested', 'separator']) assert.equal(s.nodes.get(guid).parentGuid, archive.guid)
+  assert.equal(s.nodes.get('child').parentGuid, 'nested')
+  assert.equal(s.nodes.get('child').url, 'https://example.org/')
+  assert.equal([...s.nodes.values()].some(node => node.parentGuid === 'toolbar'), false)
+  const active = state.bars.find(bar => bar.id === 'first').folderGuid
+  assert.ok([...s.nodes.values()].some(node => node.parentGuid === active && node.title === 'Original'))
+})
+
+test('an interrupted archive resumes with the same folder and original bookmark GUIDs', async () => {
+  const s = setup()
+  s.failOnce('nested')
+  await assert.rejects(s.api.getState(), /Interrupted move/)
+  const pending = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup
+  assert.equal(pending.complete, false)
+  assert.deepEqual(pending.items, ['one', 'nested'])
+  assert.equal(s.nodes.get('one').parentGuid, pending.guid)
+  assert.equal(s.nodes.get('nested').parentGuid, 'toolbar')
+  const count = s.nodes.size
+  await s.api.getState()
+  assert.equal(s.nodes.size, count)
+  assert.equal(s.nodes.get('nested').parentGuid, pending.guid)
+  assert.equal(s.nodes.get('child').parentGuid, 'nested')
+  assert.equal(JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.complete, true)
+})
+
+test('failure to create the archive leaves originals intact and retries the reserved destination', async () => {
+  const s = setup()
+  s.failOnce('Original Bookmarks Toolbar')
+  await assert.rejects(s.api.getState(), /Interrupted/)
+  const pending = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup
+  assert.equal(s.nodes.has(pending.guid), false)
+  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.get('nested').parentGuid, 'toolbar')
+  await s.api.getState()
+  assert.equal(s.nodes.get('one').parentGuid, pending.guid)
+  assert.equal([...s.nodes.values()].filter(node => node.title === 'Original Bookmarks Toolbar').length, 1)
+})
+
+test('restoring originals and deleting the archive does not trigger another automatic move', async () => {
+  const s = setup()
+  await s.api.getState()
+  const backup = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup
+  s.nodes.get('one').parentGuid = 'toolbar'
+  s.nodes.set('new', { guid: 'new', type: 1, parentGuid: 'toolbar', url: 'https://new.example/' })
+  await s.api.renameToolbar(backup.guid, 'Saved originals')
+  await s.api.deleteFolder(backup.guid)
+  s.shutdown()
+  const reloaded = new s.sandbox.floorpWorkspaceBars().getAPI({ callOnClose() {} }).floorpWorkspaceBars
+  await reloaded.getState()
+  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  assert.equal(s.nodes.get('new').parentGuid, 'toolbar')
+  assert.equal(s.nodes.has(backup.guid), false)
+  assert.equal([...s.nodes.values()].some(node => node.title === 'Original Bookmarks Toolbar'), false)
+})
+
+test('an empty standard toolbar needs no archive and later additions stay in place', async () => {
+  const s = setup()
+  for (const guid of ['one', 'nested', 'child']) s.nodes.delete(guid)
+  const state = await s.api.getState()
+  assert.equal(state.folders.some(folder => folder.name === 'Original Bookmarks Toolbar'), false)
+  assert.equal(JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup.complete, true)
+  s.nodes.set('new', { guid: 'new', type: 1, parentGuid: 'toolbar', url: 'https://new.example/' })
+  await s.api.getState()
+  assert.equal(s.nodes.get('new').parentGuid, 'toolbar')
+})
+
+test('an existing archive name is preserved without merging unrelated contents', async () => {
+  const s = setup()
+  s.nodes.set('existing-backup', { guid: 'existing-backup', parentGuid: 'root', type: 2, title: 'Original Bookmarks Toolbar' })
+  s.nodes.set('keep', { guid: 'keep', parentGuid: 'existing-backup', type: 1, url: 'https://keep.example/' })
+  const state = await s.api.getState()
+  const archive = state.folders.find(folder => folder.name === 'Original Bookmarks Toolbar (2)')
+  assert.ok(archive)
+  assert.equal(s.nodes.get('one').parentGuid, archive.guid)
+  assert.equal(s.nodes.get('keep').parentGuid, 'existing-backup')
+})
+
+test('a collection placed on the standard toolbar moves to the menu before archiving', async () => {
+  const s = setup()
+  s.nodes.get('root').parentGuid = 'toolbar'
+  await s.api.getState()
+  const backup = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup
+  assert.equal(s.nodes.get('root').parentGuid, 'menu')
+  assert.equal(s.nodes.get(backup.guid).parentGuid, 'root')
+  assert.equal(s.nodes.get('one').parentGuid, backup.guid)
+  assert.equal([...s.nodes.values()].some(node => node.parentGuid === 'toolbar'), false)
+})
+
+test('a collection nested inside the toolbar is extracted without creating a bookmark cycle', async () => {
+  const s = setup()
+  s.nodes.get('root').parentGuid = 'nested'
+  await s.api.getState()
+  const backup = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping')).toolbarBackup
+  assert.equal(s.nodes.get('root').parentGuid, 'menu')
+  assert.equal(s.nodes.get('nested').parentGuid, backup.guid)
+  assert.equal(s.nodes.get('child').parentGuid, 'nested')
+})
+
+test('concurrent startup requests create one archive and preserve existing shared bindings', async () => {
+  const s = setup()
+  addMil(s)
+  const map = JSON.parse(s.prefs.get('floorp.workspace-bookmarks.mapping'))
+  map.initializedWorkspaces = { first: true, second: true }
+  map.workspaces = { first: 'home', second: 'home' }
+  s.prefs.set('floorp.workspace-bookmarks.mapping', JSON.stringify(map))
+  await Promise.all([s.api.getState(), s.api.getState(), s.api.getState()])
+  assert.deepEqual(await s.mapping(), { Mil: 'home', Home: 'home' })
+  assert.equal([...s.nodes.values()].filter(node => node.title === 'Original Bookmarks Toolbar').length, 1)
+  assert.equal(s.nodes.get('saved').parentGuid, 'mil')
+})
+
+// Native services are represented by a small window double; no browser is launched.
+function startupWindow() {
+  const timers = new Map()
+  let nextTimer = 0
+  const element = () => ({
+    style: {}, parentNode: null, children: [],
+    setAttribute() {}, addEventListener() {}, removeEventListener() {},
+    appendChild(child) { this.children.push(child); child.parentNode = this; return child },
+    hidePopup() {}, remove() { this.parentNode = null },
+  })
+  const toolbar = element()
+  const popups = element()
+  const viewElement = {}
+  const win = {
+    closed: false, gBrowserInit: { delayedStartupFinished: true },
+    gBrowser: { tabContainer: element() }, PlacesCommandHook: {},
+    addEventListener() {}, removeEventListener() {},
+    document: {
+      documentURI: 'chrome://browser/content/browser.xhtml',
+      documentElement: popups, hasFocus: () => true,
+      getElementById: id => ({ PersonalToolbar: toolbar, mainPopupSet: popups })[id],
+      createXULElement: element, createElementNS: element,
+    },
+    setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id },
+    clearTimeout(id) { timers.delete(id) },
+    PlacesToolbarHelper: {
+      _viewElt: viewElement,
+      _realInit() { viewElement._placesView ||= { place: 'place:parent=toolbar' } },
+      async init() { this._realInit() },
+    },
+    BookmarkingUI: { async updateEmptyToolbarMessage() { win.emptyMessageUpdated = true } },
+  }
+  return {
+    win, timers, viewElement, toolbar,
+    async tick() {
+      const callbacks = [...timers.values()]
+      timers.clear()
+      for (const callback of callbacks) callback()
+      // Flush queued Places operations without depending on real startup timing.
+      await new Promise(resolve => setImmediate(resolve))
+    },
+  }
+}
+
+test('startup waits for Floorp workspace restoration without requiring a workspace click', async () => {
+  const w = startupWindow()
+  const s = setup(true, [w.win])
+  await s.api.start()
+  assert.equal(w.timers.size, 1)
+  // Workspace restoration can take longer than the old single 1.2s retry.
+  for (let attempt = 0; attempt < 5; attempt++) await w.tick()
+  assert.equal(w.timers.size, 1)
+  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+  let selected
+  w.win.workspacesFuncs = { getSelectedWorkspaceID: () => selected }
+  await w.tick()
+  selected = 'second'
+  await w.tick()
+  assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+  assert.equal(w.timers.size, 0)
+  assert.equal(w.win.emptyMessageUpdated, true)
+  assert.equal(s.prefs.get('browser.bookmarks.defaultLocation'), 'home')
+  s.shutdown()
+})
+
+test('startup retries an unavailable Places view and stops after it becomes ready', async () => {
+  const w = startupWindow()
+  const s = setup(true, [w.win])
+  w.win.workspacesFuncs = { getSelectedWorkspaceID: () => 'second' }
+  w.win.PlacesToolbarHelper.init = async () => {}
+  await s.api.start()
+  assert.equal(w.timers.size, 1)
+  await w.tick()
+  assert.equal(w.timers.size, 1)
+  w.viewElement._placesView = { place: 'place:parent=toolbar' }
+  await w.tick()
+  assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+  assert.equal(w.timers.size, 0)
+  s.shutdown()
+})
+
+test('shutdown cancels pending startup retries without archiving bookmarks', async () => {
+  const w = startupWindow()
+  const s = setup(true, [w.win])
+  await s.api.start()
+  assert.equal(w.timers.size, 1)
+  s.shutdown()
+  assert.equal(w.timers.size, 0)
+  await w.tick()
+  assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
 })
