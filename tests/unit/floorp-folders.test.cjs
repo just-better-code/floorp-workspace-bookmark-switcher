@@ -21,6 +21,7 @@ function setup(existing = true, windows = []) {
   }
   let next = 0
   let failGuid
+  const errors = []
   const bookmarks = {
     toolbarGuid: 'toolbar', menuGuid: 'menu', TYPE_FOLDER: 2, DEFAULT_INDEX: -1,
     async fetch(guid) { return nodes.get(guid) },
@@ -54,13 +55,13 @@ function setup(existing = true, windows = []) {
       prefs: { getStringPref: (key, fallback) => prefs.get(key) ?? fallback, setStringPref: (key, value) => prefs.set(key, value), getBoolPref: () => true, setBoolPref() {}, clearUserPref: key => prefs.delete(key), addObserver() {}, removeObserver() {} },
       obs: { addObserver() {}, removeObserver() {} }, wm: { getEnumerator: () => windows, getMostRecentWindow: () => windows[0] || null },
     },
-    Cu: { reportError() {} },
+    Cu: { reportError(error) { errors.push(error) } },
   }
   vm.createContext(sandbox)
   vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../../experiments/floorp.js'), 'utf8'), sandbox)
   let close
   const api = new sandbox.floorpWorkspaceBars().getAPI({ extension: { getURL: path => `extension://${path}` }, callOnClose(handler) { close = handler.close } }).floorpWorkspaceBars
-  return { api, nodes, prefs, sandbox, shutdown: () => close?.(), failOnce: guid => { failGuid = guid }, mapping: async () => Object.fromEntries((await api.getState()).bars.map(bar => [bar.name, bar.folderGuid])) }
+  return { api, nodes, prefs, sandbox, errors, shutdown: () => close?.(), failOnce: guid => { failGuid = guid }, mapping: async () => Object.fromEntries((await api.getState()).bars.map(bar => [bar.name, bar.folderGuid])) }
 }
 
 
@@ -601,4 +602,274 @@ test('shutdown cancels pending startup retries without archiving bookmarks', asy
   assert.equal(w.timers.size, 0)
   await w.tick()
   assert.equal(s.nodes.get('one').parentGuid, 'toolbar')
+})
+
+function bookmarkWindow(contextId = 4) {
+  const w = startupWindow()
+  w.contextId = contextId
+  w.opened = []
+  w.win.workspacesFuncs = {
+    getSelectedWorkspaceID: () => 'second',
+    getCurrentWorkspaceUserContextId: () => w.contextId,
+  }
+  w.win.gBrowser.addTab = function (url, options) {
+    assert.equal(this, w.win.gBrowser)
+    const tab = { url, options, originAttributes: { userContextId: options?.userContextId || 0 } }
+    w.opened.push(tab)
+    return tab
+  }
+  w.win.BookmarksEventHandler = {
+    onClick(event) {
+      assert.equal(this, w.win.BookmarksEventHandler)
+      if (event.folder) return event.urls.map(url => w.win.gBrowser.addTab(url, event.options))
+      return this.onCommand(event)
+    },
+    onCommand(event) {
+      assert.equal(this, w.win.BookmarksEventHandler)
+      if (event.fail) throw new Error('Native opening failed')
+      if (event.button === 0 && !event.ctrlKey) return 'current tab'
+      return w.win.gBrowser.addTab('https://example.com/', event.options)
+    },
+  }
+  const initializeView = w.win.PlacesToolbarHelper._realInit
+  w.win.PlacesToolbarHelper._realInit = function () {
+    initializeView.call(this)
+    const view = w.viewElement._placesView
+    if (view.controller) return
+    view.controller = {
+      doCommand(command, options = { userContextId: 0, inBackground: true }) {
+        assert.equal(this, view.controller)
+        if (command !== 'placesCmd_open:tab') return 'native command'
+        if (w.failContextCommand) throw new Error('Context command failed')
+        return w.win.gBrowser.addTab('https://example.com/', options)
+      },
+      openSelectionInTabs(event) {
+        assert.equal(this, view.controller)
+        return event.urls.map(url => w.win.gBrowser.addTab(url, event.options))
+      },
+    }
+    w.nativeControllerCommand = view.controller.doCommand
+    w.nativeControllerSelection = view.controller.openSelectionInTabs
+    if (w.protectedController) Object.defineProperty(view.controller, 'doCommand', { writable: false })
+  }
+  w.event = (props = {}) => ({
+    button: 1,
+    originalTarget: { closest: selector => selector === '#PersonalToolbar' ? w.toolbar : null },
+    options: { userContextId: 0, inBackground: true, triggeringPrincipal: { native: true } },
+    ...props,
+  })
+  return w
+}
+
+function mockBookmarkPrivacy(s, windows) {
+  const originalImport = s.sandbox.ChromeUtils.importESModule
+  s.sandbox.ChromeUtils.importESModule = name => name.includes('PrivateBrowsingUtils')
+    ? { PrivateBrowsingUtils: { isWindowPrivate: win => !!windows.find(w => w.win === win)?.private } }
+    : originalImport(name)
+}
+
+test('middle-click bookmarks choose the live workspace cookie jar before browser creation', async () => {
+  const w = bookmarkWindow()
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+  const event = w.event()
+  const tab = w.win.BookmarksEventHandler.onClick(event)
+  assert.equal(tab.originAttributes.userContextId, 4)
+  assert.equal(tab.options.inBackground, true)
+  assert.equal(tab.options.triggeringPrincipal, event.options.triggeringPrincipal)
+  assert.equal(event.options.userContextId, 0)
+  assert.equal(w.opened.length, 1)
+  w.contextId = 7
+  const shifted = w.event({ shiftKey: true, options: { inBackground: false } })
+  assert.equal(w.win.BookmarksEventHandler.onClick(shifted).originAttributes.userContextId, 7)
+  assert.equal(w.opened[1].options.inBackground, false)
+  assert.equal(w.win.BookmarksEventHandler.onCommand(w.event({ button: 0, ctrlKey: true })).originAttributes.userContextId, 7)
+  assert.equal(w.win.BookmarksEventHandler.onCommand(w.event({ button: 0 })), 'current tab')
+  s.shutdown()
+})
+
+test('folder middle-clicks and submenu commands inherit the workspace container', async () => {
+  const w = bookmarkWindow()
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const tabs = w.win.BookmarksEventHandler.onClick(w.event({ folder: true, urls: ['https://example.com/', 'https://example.org/'] }))
+  assert.deepEqual(tabs.map(tab => tab.originAttributes.userContextId), [4, 4])
+  assert.equal(w.win.BookmarksEventHandler.onCommand(w.event()).originAttributes.userContextId, 4)
+  s.shutdown()
+})
+
+test('container handling preserves explicit containers and unrelated tab creation', async () => {
+  const w = bookmarkWindow()
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const explicit = w.event({ options: { userContextId: 9, inBackground: false } })
+  assert.equal(w.win.BookmarksEventHandler.onClick(explicit).originAttributes.userContextId, 9)
+  assert.equal(w.opened[0].options, explicit.options)
+  assert.equal(w.win.BookmarksEventHandler.onClick(w.event({ originalTarget: { closest: () => null } })).originAttributes.userContextId, 0)
+  assert.equal(w.win.gBrowser.addTab('https://example.net/', { userContextId: 0 }).originAttributes.userContextId, 0)
+  s.shutdown()
+})
+
+test('private windows, disabled features and unavailable containers retain native opening', async () => {
+  const w = bookmarkWindow()
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const originalBoolPref = s.sandbox.Services.prefs.getBoolPref
+  for (const pref of ['floorp.workspaces.enabled', 'privacy.userContext.enabled']) {
+    s.sandbox.Services.prefs.getBoolPref = key => key !== pref
+    assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 0)
+  }
+  s.sandbox.Services.prefs.getBoolPref = originalBoolPref
+  w.private = true
+  assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 0)
+  w.private = false
+  for (const id of [0, undefined, -1, '4', 1.5, 0x100000000]) {
+    w.contextId = id
+    assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 0)
+  }
+  w.win.workspacesFuncs.getCurrentWorkspaceUserContextId = () => { throw new Error('Workspace unavailable') }
+  assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 0)
+  s.shutdown()
+})
+
+test('opening failure clears toolbar scope and shutdown restores native functions', async () => {
+  const w = bookmarkWindow()
+  const originalAddTab = w.win.gBrowser.addTab
+  const originalClick = w.win.BookmarksEventHandler.onClick
+  const originalCommand = w.win.BookmarksEventHandler.onCommand
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  assert.throws(() => w.win.BookmarksEventHandler.onClick(w.event({ fail: true })), /Native opening failed/)
+  assert.equal(w.win.gBrowser.addTab('https://example.net/', { userContextId: 0 }).originAttributes.userContextId, 0)
+  assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 4)
+  s.shutdown()
+  assert.equal(w.win.gBrowser.addTab, originalAddTab)
+  assert.equal(w.win.BookmarksEventHandler.onClick, originalClick)
+  assert.equal(w.win.BookmarksEventHandler.onCommand, originalCommand)
+})
+
+test('each browser window resolves its own bookmark container', async () => {
+  const first = bookmarkWindow(4)
+  const second = bookmarkWindow(7)
+  const s = setup(true, [first.win, second.win])
+  mockBookmarkPrivacy(s, [first, second])
+  await s.api.start()
+  assert.equal(first.win.BookmarksEventHandler.onClick(first.event()).originAttributes.userContextId, 4)
+  assert.equal(second.win.BookmarksEventHandler.onClick(second.event()).originAttributes.userContextId, 7)
+  s.shutdown()
+})
+
+for (const blocked of ['onClick', 'onCommand', 'addTab', 'BookmarksEventHandler']) {
+  test(`an inaccessible native ${blocked} cannot prevent displaying workspace bookmarks`, async () => {
+    const w = bookmarkWindow()
+    const originalClick = w.win.BookmarksEventHandler.onClick
+    const originalCommand = w.win.BookmarksEventHandler.onCommand
+    const originalAddTab = w.win.gBrowser.addTab
+    if (blocked === 'BookmarksEventHandler') {
+      Object.defineProperty(w.win, blocked, { get() { throw new Error('Native hook unavailable') } })
+    } else {
+      const target = blocked === 'addTab' ? w.win.gBrowser : w.win.BookmarksEventHandler
+      Object.defineProperty(target, blocked, { writable: false })
+    }
+    const s = setup(true, [w.win])
+    await s.api.start()
+    assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+    assert.equal(s.prefs.get('browser.bookmarks.defaultLocation'), 'home')
+    assert.equal(w.timers.size, 0)
+    assert.equal(w.win.emptyMessageUpdated, true)
+    assert.ok(s.errors.length > 0)
+    assert.equal(w.win.gBrowser.addTab, originalAddTab)
+    if (blocked !== 'BookmarksEventHandler') {
+      assert.equal(w.win.BookmarksEventHandler.onClick, originalClick)
+      assert.equal(w.win.BookmarksEventHandler.onCommand, originalCommand)
+    }
+    s.shutdown()
+    assert.equal(w.viewElement._placesView.place, 'place:parent=toolbar')
+  })
+}
+
+test('a failed native hook in one window does not stop toolbar setup in other windows', async () => {
+  const first = bookmarkWindow(4)
+  const second = bookmarkWindow(7)
+  Object.defineProperty(first.win.gBrowser, 'addTab', { writable: false })
+  const s = setup(true, [first.win, second.win])
+  mockBookmarkPrivacy(s, [first, second])
+  await s.api.start()
+  assert.equal(first.viewElement._placesView.place, 'place:parent=home')
+  assert.equal(second.viewElement._placesView.place, 'place:parent=home')
+  assert.equal(first.win.BookmarksEventHandler.onClick(first.event()).originAttributes.userContextId, 0)
+  assert.equal(second.win.BookmarksEventHandler.onClick(second.event()).originAttributes.userContextId, 7)
+  s.shutdown()
+})
+
+test('Open in New Tab context command uses the active workspace container', async () => {
+  const w = bookmarkWindow(4)
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const controller = w.viewElement._placesView.controller
+  // Context commands bypass BookmarksEventHandler.onClick and onCommand.
+  const options = { userContextId: 0, inBackground: true, triggeringPrincipal: { native: true } }
+  const tab = controller.doCommand('placesCmd_open:tab', options)
+  assert.equal(tab.originAttributes.userContextId, 4)
+  assert.equal(tab.options.inBackground, true)
+  assert.equal(tab.options.triggeringPrincipal, options.triggeringPrincipal)
+  assert.equal(options.userContextId, 0)
+  w.contextId = 7
+  assert.equal(controller.doCommand('placesCmd_open:tab').originAttributes.userContextId, 7)
+  assert.equal(controller.doCommand('placesCmd_open:tab', { userContextId: 9 }).originAttributes.userContextId, 9)
+  assert.equal(controller.doCommand('placesCmd_open:window'), 'native command')
+  assert.equal(w.win.gBrowser.addTab('https://elsewhere.example/', { userContextId: 0 }).originAttributes.userContextId, 0)
+  w.failContextCommand = true
+  assert.throws(() => controller.doCommand('placesCmd_open:tab'), /Context command failed/)
+  assert.equal(w.win.gBrowser.addTab('https://elsewhere.example/', { userContextId: 0 }).originAttributes.userContextId, 0)
+  s.shutdown()
+  assert.equal(controller.doCommand, w.nativeControllerCommand)
+  assert.equal(controller.openSelectionInTabs, w.nativeControllerSelection)
+})
+
+test('Open All in Tabs context command applies the container to every bookmark', async () => {
+  const w = bookmarkWindow(4)
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const tabs = w.viewElement._placesView.controller.openSelectionInTabs(w.event({ urls: ['https://example.com/', 'https://example.org/'] }))
+  assert.deepEqual(tabs.map(tab => tab.originAttributes.userContextId), [4, 4])
+  s.shutdown()
+})
+
+test('rebuilding the native toolbar also wraps its new context command controller', async () => {
+  const w = bookmarkWindow(4)
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  const oldController = w.viewElement._placesView.controller
+  const oldCommand = w.nativeControllerCommand
+  delete w.viewElement._placesView
+  await w.win.PlacesToolbarHelper.init()
+  const controller = w.viewElement._placesView.controller
+  assert.notEqual(controller, oldController)
+  assert.equal(controller.doCommand('placesCmd_open:tab').originAttributes.userContextId, 4)
+  assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+  s.shutdown()
+  assert.equal(oldController.doCommand, oldCommand)
+  assert.equal(controller.doCommand, w.nativeControllerCommand)
+})
+
+test('a protected context controller preserves the toolbar and working middle-click support', async () => {
+  const w = bookmarkWindow(4)
+  w.protectedController = true
+  const s = setup(true, [w.win])
+  mockBookmarkPrivacy(s, [w])
+  await s.api.start()
+  assert.equal(w.viewElement._placesView.place, 'place:parent=home')
+  assert.equal(w.win.BookmarksEventHandler.onClick(w.event()).originAttributes.userContextId, 4)
+  assert.equal(w.viewElement._placesView.controller.doCommand, w.nativeControllerCommand)
+  s.shutdown()
 })

@@ -20,6 +20,10 @@ The optional `toolbarBackup` mapping field records a reserved destination GUID a
 
 During normal workspace switching, the extension updates each window's Places query instead of moving bookmarks. It directs new bookmarks to the displayed folder. Event handlers, the selector, and patched browser functions are removed on shutdown. `browser.toolbars.bookmarks.showOtherBookmarks` is set to false and remains false after shutdown.
 
+Native toolbar click and command handlers retain their opening behavior. While they create tabs, a per-window `gBrowser.addTab` wrapper replaces a missing or zero container ID with the active workspace's container before the content browser is created. Explicit nonzero container choices, private windows, disabled workspaces or containers, and unrelated tab creation retain native behavior. The container is read when the tab opens. Hook installation is optional and transactional: inaccessible or protected native functions cause its partial changes to be restored, without interrupting toolbar initialization in this or other windows. These wrappers are removed on shutdown. No additional permissions, stored preferences, or bookmark-storage changes are introduced by this opening fix.
+
+The toolbar view's own Places controller also scopes `placesCmd_open:tab` and `openSelectionInTabs`, covering the context menu's Open in New Tab and Open All in Tabs actions. Each newly created toolbar view receives these hooks when applied; other Places views are unaffected. Protected controller methods fall back to native behavior without disabling working click hooks or interrupting the toolbar. Controller hooks are restored on shutdown.
+
 Startup waits for a valid restored workspace selection and initializes the native Places view before applying its binding. A single cancellable retry per window handles delayed Floorp restoration or an unavailable toolbar view; it stops after success and is cleared on shutdown. No workspace click is required.
 
 ## Development checks
@@ -43,6 +47,6 @@ The workflow uses GitHub's built-in token with `contents: write`; repository or 
 
 ## Identity
 
-Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.2.0`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
+Name: Floorp Bookmark Toolbar Autoswitch. Version: `0.2.2`. ID: `bookmark-toolbar-autoswitch@just-better-code`.
 
 MIT attribution is retained in LICENSE. No browser profile is part of the extension.

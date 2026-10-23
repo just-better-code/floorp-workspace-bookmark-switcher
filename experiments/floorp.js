@@ -525,6 +525,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       if (toolbar && rec.selector && rec.selector.parentNode !== toolbar) toolbar.appendChild(rec.selector);
       if (!rec.folderGuid) return;
       const view = rec.win.PlacesToolbarHelper?._viewElt?._placesView;
+      rec.patchBookmarkController?.(view);
       const place = 'place:parent=' + rec.folderGuid;
       if (view && view.place !== place) view.place = place;
       if (rec.win.document.hasFocus()) Services.prefs.setStringPref('browser.bookmarks.defaultLocation', rec.folderGuid);
@@ -571,6 +572,98 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
         await rec.win.BookmarkingUI.updateEmptyToolbarMessage();
       } catch (error) { Cu.reportError(error); retryUpdate(rec); }
     }
+    function installBookmarkOpening(rec) {
+      const removers = [];
+      try {
+        const win = rec.win;
+        const handler = win.BookmarksEventHandler;
+        const browser = win.gBrowser;
+        if (!handler || typeof browser.addTab !== 'function') return;
+        let fromToolbar = false;
+        const replace = (target, name, patched, cleanup = removers) => {
+          const original = target[name];
+          target[name] = patched;
+          if (target[name] !== patched) throw new Error(`Cannot wrap bookmark opening: ${name}`);
+          cleanup.push(() => { if (target[name] === patched) target[name] = original; });
+        };
+        for (const name of ['onClick', 'onCommand']) {
+          const original = handler[name];
+          if (typeof original !== 'function') continue;
+          replace(handler, name, function (event, ...args) {
+            const previous = fromToolbar;
+            const target = event.originalTarget || event.target;
+            fromToolbar = !!target?.closest?.('#PersonalToolbar');
+            try { return original.call(this, event, ...args); }
+            finally { fromToolbar = previous; }
+          });
+        }
+        if (!removers.length) return;
+        const original = browser.addTab;
+        replace(browser, 'addTab', function (url, options, ...args) {
+          let userContextId;
+          try {
+            if (fromToolbar && !rec.detached && !closed && !options?.userContextId
+                && Services.prefs.getBoolPref('floorp.workspaces.enabled', false)
+                && Services.prefs.getBoolPref('privacy.userContext.enabled', false)) {
+              const { PrivateBrowsingUtils } = ChromeUtils.importESModule('resource://gre/modules/PrivateBrowsingUtils.sys.mjs');
+              if (!PrivateBrowsingUtils.isWindowPrivate(win)) {
+                userContextId = win.workspacesFuncs?.getCurrentWorkspaceUserContextId?.();
+              }
+            }
+          } catch (error) { Cu.reportError(error); }
+          // Choose the cookie jar before Firefox constructs the content browser.
+          if (Number.isInteger(userContextId) && userContextId > 0 && userContextId <= 0xffffffff) {
+            options = { ...options, userContextId };
+          }
+          return original.call(this, url, options, ...args);
+        });
+        const controllers = new WeakSet();
+        const controllerRemovers = [];
+        const patchController = view => {
+          const pending = [];
+          try {
+            const controller = view?.controller;
+            if (!controller || controllers.has(controller)) return;
+            controllers.add(controller);
+            for (const name of ['doCommand', 'openSelectionInTabs']) {
+              const original = controller[name];
+              if (typeof original !== 'function') continue;
+              replace(controller, name, function (...args) {
+                const previous = fromToolbar;
+                // The toolbar's own controller handles its context menu, which
+                // bypasses BookmarksEventHandler. Only tab-opening commands enter
+                // the toolbar scope.
+                fromToolbar = name === 'openSelectionInTabs' || args[0] === 'placesCmd_open:tab';
+                try { return original.apply(this, args); }
+                finally { fromToolbar = previous; }
+              }, pending);
+            }
+            controllerRemovers.push(...pending);
+          } catch (error) {
+            for (const remove of pending.reverse()) {
+              try { remove(); } catch (cleanupError) { Cu.reportError(cleanupError); }
+            }
+            Cu.reportError(error);
+          }
+        };
+        rec.patchBookmarkController = patchController;
+        removers.push(() => {
+          delete rec.patchBookmarkController;
+          for (const remove of controllerRemovers.reverse()) {
+            try { remove(); } catch (error) { Cu.reportError(error); }
+          }
+        });
+        patchController(win.PlacesToolbarHelper?._viewElt?._placesView);
+        // Native hooks are optional. A failure must not interrupt the toolbar's
+        // initialization or leave a partially installed set of wrappers behind.
+        rec.removers.push(...removers);
+      } catch (error) {
+        for (const remove of removers.reverse()) {
+          try { remove(); } catch (cleanupError) { Cu.reportError(cleanupError); }
+        }
+        Cu.reportError(error);
+      }
+    }
     function install(win) {
       if (records.has(win) || win.document.documentURI !== 'chrome://browser/content/browser.xhtml') return;
       win.__floorpWorkspaceBarController?.dispose();
@@ -610,6 +703,7 @@ var floorpWorkspaceBars = class extends ExtensionCommon.ExtensionAPI {
       }
       listen(win, 'unload', event => { if (event.target !== win.document) return; rec.dispose(); records.delete(win); });
       update(rec);
+      installBookmarkOpening(rec);
     }
     const allWindows = () => {
       for (const win of Services.wm.getEnumerator('navigator:browser')) if (win.gBrowserInit?.delayedStartupFinished) install(win);

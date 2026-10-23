@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2
+
+- Apply the active workspace's container to the toolbar context menu's Open in New Tab and Open All in Tabs commands. Reattach context command hooks when the native toolbar view is rebuilt, and restore them on shutdown.
+
+## 0.2.1
+
+- Use the active workspace's container when toolbar bookmarks create tabs, including middle-clicks, while preserving native opening preferences and explicit container choices.
+- Keep toolbar initialization independent of optional native opening hooks. If a hook is unavailable or cannot be replaced, restore any partially installed wrappers and continue displaying workspace bookmarks.
+
 ## 0.2.0
 
 - Retry workspace and native bookmark view initialization every second until ready, applying the current toolbar after a browser restart without a workspace click.
